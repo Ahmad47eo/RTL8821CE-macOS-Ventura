@@ -33,4 +33,24 @@ s = s[:start] + stub + s[end+2:]
 p.write_text(s)
 if "return kIOReturnUnsupported;" not in s[start:start+700]:
     raise SystemExit("stub verification failed")
+# The public MacKernelSDK declares apple80211_scan_result as the 152-byte
+# public prefix. The upstream 1164-byte assertion incorrectly treats the
+# private kernel allocation size as the public C type size. All accesses in
+# fillScanResultFromBSS are through declared fields and cap IE copies at
+# sizeof(d->asr_ie_data), so retain the public-prefix implementation.
+source = Path("AirPort_RTW88/src/kext/AirportRTW88.cpp")
+cpp = source.read_text()
+abi_assert = '    static_assert(sizeof(apple80211_scan_result) == 1164, "Ventura CURRENT_NETWORK ABI changed");\n'
+if abi_assert not in cpp:
+    raise SystemExit("expected CURRENT_NETWORK size assertion not found; refusing patch")
+cpp = cpp.replace(
+    abi_assert,
+    '    /* Public MacKernelSDK exposes the 152-byte scan-result prefix; the\n'
+    '     * private Ventura allocation is larger. Only declared prefix fields\n'
+    '     * are written, and IE copies are bounded by sizeof(asr_ie_data). */\n',
+    1,
+)
+source.write_text(cpp)
+print("Removed invalid private-allocation-size assertion; public fields remain bounded.")
+
 print("Patched optional AWDL/P2P private-ABI dispatcher; STA path retained.")
