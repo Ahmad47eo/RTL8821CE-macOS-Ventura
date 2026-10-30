@@ -75,6 +75,50 @@ jobs:
           done
           shasum -a 256 firmware/*.bin
 
+      - name: Generate missing native AirPort kext bundle metadata
+        working-directory: AirPort_RTW88
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Upstream Makefile references this bundle skeleton, but the current
+          # upstream checkout does not contain it. Generate metadata from the
+          # upstream class and kmod declarations rather than failing at make.
+          mkdir -p AirPort_RTW88.kext/Contents
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          info = {
+              "CFBundleDevelopmentRegion": "English",
+              "CFBundleExecutable": "AirPort_RTW88",
+              "CFBundleIdentifier": "com.rtw88.airport",
+              "CFBundleInfoDictionaryVersion": "6.0",
+              "CFBundleName": "AirPort_RTW88",
+              "CFBundlePackageType": "KEXT",
+              "CFBundleShortVersionString": "1.0.1",
+              "CFBundleVersion": "1.0.1",
+              "OSBundleRequired": "Root",
+              "OSBundleLibraries": {
+                  "com.apple.kernel": "20.0.0",
+                  "com.apple.iokit.IOPCIFamily": "2.9",
+                  "com.apple.iokit.IO80211Family": "1.0.0"
+              },
+              "IOKitPersonalities": {
+                  "AirPort_RTW88-RTL8821CE": {
+                      "CFBundleIdentifier": "com.rtw88.airport",
+                      "IOClass": "AirportRTW88",
+                      "IOProviderClass": "IOPCIDevice",
+                      "IOPCIPrimaryMatch": "0xB82110EC 0xC82110EC",
+                      "IOProbeScore": 1000
+                  }
+              }
+          }
+          target = Path("AirPort_RTW88.kext/Contents/Info.plist")
+          target.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=True))
+          with target.open("rb") as f:
+              plistlib.load(f)
+          print(target)
+          PY
+
       - name: Build x86_64 kext and control utility
         working-directory: AirPort_RTW88
         shell: bash
