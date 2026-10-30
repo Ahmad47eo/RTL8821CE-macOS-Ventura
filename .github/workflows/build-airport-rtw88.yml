@@ -10,6 +10,7 @@ on:
   push:
     paths:
       - ".github/workflows/build-airport-rtw88.yml"
+      - "patches/**"
 
 permissions:
   contents: read
