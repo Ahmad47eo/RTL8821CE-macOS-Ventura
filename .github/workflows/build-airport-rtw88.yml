@@ -165,7 +165,7 @@ jobs:
           Xcode: $(xcodebuild -version | tr '\n' ' ')
           macOS SDK: $(xcrun --sdk macosx --show-sdk-version)
           Build target: x86_64; Makefile minimum macOS target: 13.0
-          Build command: make all
+          Build commands: make clean; make airport; make ctl
           Note: Successful compilation does NOT prove the kext works on a particular laptop.
           EOF
           (cd package && shasum -a 256 rtw88ctl AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88 > SHA256SUMS)
