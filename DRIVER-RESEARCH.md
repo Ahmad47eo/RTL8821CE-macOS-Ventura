@@ -29,3 +29,11 @@ A kext appearing in `kmutil showloaded` does not prove the driver matched the PC
 ## Safety
 
 Do not replace the entire EFI. Keep a known-good bootable EFI backup on a separate USB. Avoid changing SIP, Secure Boot, or IOMMU settings without a documented upstream requirement and a recovery plan. Never publish personal serial numbers, UUIDs, MAC addresses, or passwords.
+
+## AirPort_RTW88 CI investigation (2026-10-30)
+
+The current native-AirPort build attempt is blocked in upstream AWDL/P2P code, not by the bundle Info.plist. The upstream `AirportRTW88.hpp` includes `RTW88AWDLManager.hpp` and declares virtual-interface callbacks; `AirportRTW88.cpp` constructs and owns the AWDL manager, attaches AWDL/P2P virtual interfaces, and routes AWDL frames. Therefore, simply removing `AirportRTW88AWDL.cpp` from the Makefile is not a safe fix: the main driver has direct dependencies on those classes and callbacks.
+
+The CI compiler errors seen in `AirportRTW88AWDL.cpp` involve Apple 802.11 SDK types that are unavailable/incompatible in the selected build SDK. A proper fix needs a source-level compatibility layer or a supported SDK/toolchain, followed by a successful clean x86_64 build. Do not ship a partially linked kext or label it Ventura-compatible until that succeeds.
+
+The upstream repository currently has no official GitHub release asset for a ready-to-install Ventura binary. The user's repository workflow is a research build, not a validated installer. No EFI changes are required for this investigation.
