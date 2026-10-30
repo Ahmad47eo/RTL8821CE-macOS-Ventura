@@ -33,24 +33,42 @@ s = s[:start] + stub + s[end+2:]
 p.write_text(s)
 if "return kIOReturnUnsupported;" not in s[start:start+700]:
     raise SystemExit("stub verification failed")
-# The public MacKernelSDK declares apple80211_scan_result as the 152-byte
-# public prefix. The upstream 1164-byte assertion incorrectly treats the
-# private kernel allocation size as the public C type size. All accesses in
-# fillScanResultFromBSS are through declared fields and cap IE copies at
-# sizeof(d->asr_ie_data), so retain the public-prefix implementation.
+# The public MacKernelSDK scan-result structure is 152 bytes and its
+# asr_ie_data member is a POINTER, not an inline byte array. The upstream
+# 1164-byte assertion is invalid for this public declaration, and writing
+# IE bytes through the zeroed pointer would crash. Keep the safe scalar
+# scan-result fields and report no IE payload until a valid owner/lifetime
+# contract is implemented.
 source = Path("AirPort_RTW88/src/kext/AirportRTW88.cpp")
 cpp = source.read_text()
-abi_assert = '    static_assert(sizeof(apple80211_scan_result) == 1164, "Ventura CURRENT_NETWORK ABI changed");\n'
+abi_assert = '    static_assert(sizeof(apple80211_scan_result) == 1164, "Ventura CURRENT_NETWORK ABI changed");\\n'
 if abi_assert not in cpp:
     raise SystemExit("expected CURRENT_NETWORK size assertion not found; refusing patch")
 cpp = cpp.replace(
     abi_assert,
-    '    /* Public MacKernelSDK exposes the 152-byte scan-result prefix; the\n'
-    '     * private Ventura allocation is larger. Only declared prefix fields\n'
-    '     * are written, and IE copies are bounded by sizeof(asr_ie_data). */\n',
+    '    static_assert(sizeof(((apple80211_scan_result *)0)->asr_ie_data) == sizeof(void *),\\n'
+    '                  "apple80211_scan_result IE member must be a pointer");\\n',
     1,
 )
+ie_start = '    const size_t ieLength = b.ies_len > sizeof(b.ies) ? sizeof(b.ies) : b.ies_len;\\n'
+ie_end = '    }\\n'
+start = cpp.find(ie_start)
+if start < 0:
+    if 'IE payload intentionally omitted' not in cpp:
+        raise SystemExit("scan-result IE block not found; refusing patch")
+else:
+    end = cpp.find(ie_end, cpp.find('        /* Preserve the already-working Ventura SCAN_RESULT contract:', start))
+    if end < 0:
+        raise SystemExit("scan-result IE block end not found; refusing patch")
+    end += len(ie_end)
+    safe_ie = ('    /* asr_ie_data is a pointer in this SDK, not inline storage.\\n'
+               '     * Do not copy into the NULL pointer after bzero(). IE payloads\\n'
+               '     * are omitted until their allocation/ownership contract is\\n'
+               '     * implemented for Ventura. */\\n'
+               '    d->asr_ie_len = 0;\\n'
+               '    d->asr_ie_data = nullptr;\\n')
+    cpp = cpp[:start] + safe_ie + cpp[end:]
 source.write_text(cpp)
-print("Removed invalid private-allocation-size assertion; public fields remain bounded.")
+print("Removed invalid ABI size assertion and unsafe IE pointer writes.")
 
 print("Patched optional AWDL/P2P private-ABI dispatcher; STA path retained.")
