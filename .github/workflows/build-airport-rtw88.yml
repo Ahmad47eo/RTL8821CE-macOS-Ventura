@@ -1,0 +1,132 @@
+name: Build AirPort_RTW88 for Intel Ventura
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "AirPort_RTW88 branch, tag, or commit to build"
+        required: true
+        default: "main"
+  push:
+    paths:
+      - ".github/workflows/build-airport-rtw88.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: airport-rtw88-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Intel macOS runner is required because this project builds x86_64 kernel code.
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - name: Check out this research repository
+        uses: actions/checkout@v4
+        with:
+          path: research
+
+      - name: Check out upstream AirPort_RTW88
+        uses: actions/checkout@v4
+        with:
+          repository: xnoah222/Airport_RTW88
+          ref: ${{ inputs.upstream_ref || 'main' }}
+          submodules: recursive
+          path: AirPort_RTW88
+          persist-credentials: false
+
+      - name: Record source revisions and toolchain
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "airport_sha=$(git -C AirPort_RTW88 rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "airport_short=$(git -C AirPort_RTW88 rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "runner_arch=$(uname -m)" 
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          git -C AirPort_RTW88 submodule status
+
+      - name: Check out Linux rtw88 source dependency
+        uses: actions/checkout@v4
+        with:
+          repository: thegwchr/rtw88-stable
+          path: rtw88-stable
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch required Realtek firmware blobs
+        working-directory: AirPort_RTW88
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p firmware
+          for fw in rtw8822b_fw.bin rtw8822c_fw.bin rtw8821c_fw.bin \
+                    rtw8821a_fw.bin rtw8812a_fw.bin rtw8814a_fw.bin; do
+            if [ ! -s "firmware/$fw" ]; then
+              curl --fail --location --retry 3 \
+                "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/$fw" \
+                --output "firmware/$fw"
+            fi
+            test -s "firmware/$fw"
+          done
+          shasum -a 256 firmware/*.bin
+
+      - name: Build x86_64 kext and control utility
+        working-directory: AirPort_RTW88
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          make clean
+          make all
+          test -d build/out/rtw88.kext
+          test -s build/out/rtw88.kext/Contents/MacOS/rtw88
+          test -s build/out/rtw88ctl
+
+      - name: Validate build outputs
+        working-directory: AirPort_RTW88
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint rtw88.kext/Contents/Info.plist
+          file build/out/rtw88.kext/Contents/MacOS/rtw88
+          lipo -info build/out/rtw88.kext/Contents/MacOS/rtw88
+          dwarfdump --uuid build/out/rtw88.kext/Contents/MacOS/rtw88
+          codesign -dv --verbose=2 build/out/rtw88.kext 2>&1 || true
+          shasum -a 256 build/out/rtw88.kext/Contents/MacOS/rtw88 build/out/rtw88ctl
+
+      - name: Package build with provenance
+        shell: bash
+        env:
+          UPSTREAM_SHA: ${{ steps.source.outputs.airport_sha }}
+          UPSTREAM_SHORT: ${{ steps.source.outputs.airport_short }}
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          ditto AirPort_RTW88/build/out/rtw88.kext package/rtw88.kext
+          cp AirPort_RTW88/build/out/rtw88ctl package/
+          cat > package/BUILD-INFO.txt <<EOF
+          Project: xnoah222/Airport_RTW88
+          Upstream commit: $UPSTREAM_SHA
+          Upstream short commit: $UPSTREAM_SHORT
+          Runner: $(sw_vers -productVersion) / $(uname -m)
+          Xcode: $(xcodebuild -version | tr '\n' ' ')
+          macOS SDK: $(xcrun --sdk macosx --show-sdk-version)
+          Build target: x86_64; Makefile minimum macOS target: 13.0
+          Build command: make all
+          Note: Successful compilation does NOT prove the kext works on a particular laptop.
+          EOF
+          (cd package && shasum -a 256 rtw88ctl rtw88.kext/Contents/MacOS/rtw88 > SHA256SUMS)
+          ditto -c -k --sequesterRsrc --keepParent package AirPort_RTW88-${UPSTREAM_SHORT}-x86_64.zip
+
+      - name: Upload experimental build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirPort_RTW88-${{ steps.source.outputs.airport_short }}-x86_64
+          path: AirPort_RTW88-*-x86_64.zip
+          if-no-files-found: error
+          retention-days: 14
