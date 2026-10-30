@@ -38,6 +38,14 @@ jobs:
           path: AirPort_RTW88
           persist-credentials: false
 
+      - name: Disable unsupported optional AWDL private-ABI ioctl payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/patches/disable-private-awdl-ioctl.py
+          git -C AirPort_RTW88 diff --check
+          git -C AirPort_RTW88 diff -- src/kext/AirportRTW88AWDL.cpp
+
       - name: Record source revisions and toolchain
         id: source
         shell: bash
