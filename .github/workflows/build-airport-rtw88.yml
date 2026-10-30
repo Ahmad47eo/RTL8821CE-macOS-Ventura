@@ -82,9 +82,13 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = "x86_64"
           make clean
-          make all
-          test -d build/out/rtw88.kext
-          test -s build/out/rtw88.kext/Contents/MacOS/rtw88
+          # Build the native AirPort bundle, not the legacy Ethernet-style rtw88 bundle.
+          # The upstream Makefile's "all" target invokes "kext", which expects a
+          # separate rtw88.kext skeleton absent from this repository.
+          make airport
+          make ctl
+          test -d build/out/AirPort_RTW88.kext
+          test -s build/out/AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88
           test -s build/out/rtw88ctl
 
       - name: Validate build outputs
@@ -92,12 +96,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          plutil -lint rtw88.kext/Contents/Info.plist
-          file build/out/rtw88.kext/Contents/MacOS/rtw88
-          lipo -info build/out/rtw88.kext/Contents/MacOS/rtw88
-          dwarfdump --uuid build/out/rtw88.kext/Contents/MacOS/rtw88
-          codesign -dv --verbose=2 build/out/rtw88.kext 2>&1 || true
-          shasum -a 256 build/out/rtw88.kext/Contents/MacOS/rtw88 build/out/rtw88ctl
+          plutil -lint AirPort_RTW88.kext/Contents/Info.plist
+          file build/out/AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88
+          lipo -info build/out/AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88
+          dwarfdump --uuid build/out/AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88
+          codesign -dv --verbose=2 build/out/AirPort_RTW88.kext 2>&1 || true
+          shasum -a 256 build/out/AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88 build/out/rtw88ctl
 
       - name: Package build with provenance
         shell: bash
@@ -107,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package
-          ditto AirPort_RTW88/build/out/rtw88.kext package/rtw88.kext
+          ditto AirPort_RTW88/build/out/AirPort_RTW88.kext package/AirPort_RTW88.kext
           cp AirPort_RTW88/build/out/rtw88ctl package/
           cat > package/BUILD-INFO.txt <<EOF
           Project: xnoah222/Airport_RTW88
@@ -120,7 +124,7 @@ jobs:
           Build command: make all
           Note: Successful compilation does NOT prove the kext works on a particular laptop.
           EOF
-          (cd package && shasum -a 256 rtw88ctl rtw88.kext/Contents/MacOS/rtw88 > SHA256SUMS)
+          (cd package && shasum -a 256 rtw88ctl AirPort_RTW88.kext/Contents/MacOS/AirPort_RTW88 > SHA256SUMS)
           ditto -c -k --sequesterRsrc --keepParent package AirPort_RTW88-${UPSTREAM_SHORT}-x86_64.zip
 
       - name: Upload experimental build artifact
